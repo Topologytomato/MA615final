@@ -1,0 +1,230 @@
+---
+title: "EDA report for MBTA data"
+author: "Jing Wu"
+date: "2022-12-17"
+output: pdf_document
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+setwd("/Users/willowwu/Documents/MA615final")
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE) 
+library(lubridate)
+library(ggplot2)
+library(tidyverse)
+bus_times_full <- read.csv("bus_times_full.txt")
+checkpoints_full <- read.csv("checkpoints_full.txt")
+travel_times_full <- read.csv("travel_times_full.txt")
+data_combined_traveltime <- read.csv("data_combined_traveltime.txt")
+routes_full <- read.csv("routes_full.txt")
+calendar_full <- read.csv("calendar_full.txt")
+calendar_dates_full <- read.csv("calendar_dates_full.txt")
+data_ferry <- read.csv("data_ferry.txt")
+trips_full <- read.csv("trips_full.txt")
+
+# join the data frame
+calendar_full <- calendar_full %>% 
+  left_join(trips_full) %>% 
+  left_join(routes_full[, c("route_id", "route_long_name", "route_desc")])
+
+calendar_dates_full <- calendar_dates_full %>%
+  left_join(trips_full) %>%
+  left_join(routes_full[, c("route_id", "route_long_name", "route_desc")])
+ 
+# combine scheduled travel times data with ferry data
+data_combined_traveltime <- rbind(data_combined_traveltime, data_ferry)
+```
+
+# Instrution
+## MBTA
+MBTA(Massachusetts Bay Transportation Authority) is a public transporation services in Greater Boston. It contains rapid transits, bus, commuter rail and ferry routes.
+
+## Main ideal
+The main ideal of the report is EDA towards the MBTA data. 
+
+## Data resource
+Data used in the report is data cleaned from raw data of MBTA archive and MBTA Open Data Portal. The data is all filtered by date(1 random week for each month), and the range of months used is from Nov. 2021 to Oct. 2022.
+
+
+## Routes and calendar
+
+First, we plot the stops and routes for the data.
+
+```{r, echo=FALSE}
+routes_full <- routes_full %>% filter(route_desc!= "")
+ggplot(routes_full) +
+  aes(x = route_desc) +
+  geom_bar(fill = "#5FC4C2") +
+  coord_flip() +
+  labs(
+    x = "routes type",
+    y = "routes number",
+    title = "Routes number vs Routes type"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18L,
+    hjust = 0.5),
+    axis.title.y = element_text(size = 13L),
+    axis.title.x = element_text(size = 13L),
+    axis.text.x = element_text(size = 8L),
+    axis.text.y = element_text(size = 8L)
+  )
+```
+
+From the plot we can find that the number of local bus and replacement bus seem to be most, and there are also a lot of key bus routes.
+
+```{r, echo=FALSE}
+calendar_plot <- pivot_longer(calendar_full, cols = c("monday","tuesday","wednesday","thursday" ,"friday","saturday","sunday"), names_to = "days")
+calendar_plot <- calendar_plot %>% filter(route_desc!= "")
+calendar_plot <- calendar_plot %>% group_by(route_desc, days) %>% summarize(sum(value))
+
+ggplot(calendar_plot) +
+  aes(x = days, y = route_desc, fill = `sum(value)`) +
+  geom_tile() +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  labs(x = "days", y = "route type", title = "Routes type numbers vs days", fill = "numbers") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18L,
+    hjust = 0.5),
+    axis.title.y = element_text(size = 13L),
+    axis.title.x = element_text(size = 13L),
+    axis.text.x = element_text(size = 7L)
+  )
+```
+
+The heat map shows the information saved in calendar.txt. From the plot, we can find that the number of routes scheduled on weekdays is significantly higher than the number on weekends. Also, for weekdays, there are more scheduled routes on Thursday and Friday.
+
+```{r, echo=FALSE}
+calendar_dates_plot <- calendar_dates_full %>%
+  group_by(holiday_name, route_desc) %>% summarise(count = n())
+calendar_dates_plot <- calendar_dates_plot %>% 
+  filter(!is.na(holiday_name)) %>%
+  filter(holiday_name != "") %>%
+  filter(route_desc != "")
+
+ggplot(calendar_dates_plot) +
+  aes(x = route_desc, y = holiday_name, fill = count) +
+  geom_tile() +
+  scale_fill_distiller(palette = "YlGnBu", direction = 1) +
+  labs(x = "holiday name", y = "routes type", title = "Routes in holiday vs routes type", fill = "numbers") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18L,
+    hjust = 0.5),
+    axis.title.y = element_text(size = 13L),
+    axis.title.x = element_text(size = 13L),
+    axis.text.x = element_text(size = 5L),
+    axis.text.y = element_text(size = 5L),
+    legend.text = element_text(size = 5L))+
+  guides(color = guide_legend(override.aes = list(size = 3)))
+```
+
+From the plot, we can observe the number of routes for holiday. In general, the routes in Veterans Day and Day after Thanksgiving day are most in data sample, and () do not provide service in most holidays.
+
+## Scheduled times
+```{r, echo=FALSE}
+data_scheduletime <- data_combined_traveltime %>% group_by(route_id, route_desc, travel_time, month) %>% summarise(count = n())
+
+ggplot(data_scheduletime) +
+  aes(x = travel_time, y = route_desc) +
+  geom_boxplot(fill = "#BFD971") +
+  labs(x = "scheduled travel time", y = "route type") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18L,
+    hjust = 0.5),
+    axis.title.y = element_text(size = 10L),
+    axis.title.x = element_text(size = 10L)
+  )
+
+```
+
+From the plot, we can find the travel time between two adjacent stations. The ferry travel time will take much longer than others, and commuter buses tend to have longer travel time than key and local buses.
+
+## Reliability of rapid trasit
+
+```{r, echo=FALSE}
+data_plot <- travel_times_full[, c("route_id", "travel_time_sec")]
+ggplot(data_plot,aes(x=route_id, y=travel_time_sec))+
+  geom_boxplot() +
+  labs(x = "routes", y = "real travel times") +
+  theme(
+    axis.title.y = element_text(size = 13L),
+    axis.title.x = element_text(size = 13L)
+  )
+
+```
+
+The plot is about the real travel time distribution of different lines in rapid transit. Although the mean values of green, red and orange lines are pretty close, the red line has more high value than other subway lines.
+
+
+```{r, echo=FALSE}
+travel_times_full$month <- as.integer(travel_times_full$month)
+data_travel_summarise <- travel_times_full %>% group_by(month) %>% summarise(mean(travel_time_sec))
+
+data_travel_summarise$month <- factor(1:11, labels = month.abb[c(1:9, 11:12)])
+
+ggplot(data_travel_summarise,
+  aes(x = month, y = `mean(travel_time_sec)`)) +
+  geom_col(fill = "#D6B1D4") +
+  labs(x = "month", y = "real travel times", title = "Travel time for rapid transit vs month") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18L,
+    hjust = 0.5),
+    axis.title.y = element_text(size = 13L),
+    axis.title.x = element_text(size = 13L)
+  )
+```
+
+From the plot, we can find that the average travel time is about 800 seconds, and in May, rapid transit tends to have higher average travel times.
+
+```{r, echo=FALSE}
+data_plot <- travel_times_full[, c("month", "travel_time_sec")]
+data_plot$month <- as.character(data_plot$month)
+
+ggplot(data_plot, aes(x=month, y=travel_time_sec))+
+  geom_boxplot() +
+  labs(x = "month", y = "real travel times") +
+  theme(
+    axis.title.y = element_text(size = 13L),
+    axis.title.x = element_text(size = 13L)
+  )
+
+rm(travel_times_full, data_plot)
+```
+
+From the plot we can find that April had more unusually high values than any other month.
+
+## Reliability of bus
+```{r, echo=FALSE}
+q <- bus_times_full %>% group_by(checkpoint_name) %>% summarise(mean_timedif = mean(time_difference, na.rm = TRUE)) %>% arrange(desc(mean_timedif))
+
+ggplot(q[1:10, ]) +
+  aes(x = checkpoint_name, y = mean_timedif) +
+  labs(x = "TAverage time difference", y = "Stop name") +
+  geom_boxplot(fill = "#BFD971") +
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18L,
+    hjust = 0.5),
+    axis.title.y = element_text(size = 8L),
+    axis.title.x = element_text(size = 8L),
+    axis.text.x = element_text(size = 6L),
+    axis.text.y = element_text(size = 6L)
+  )
+
+```
+
+The plot shows the 10 bus check points with the highest average lag from the scheduled time.
+
+## Conclusion
+
+In conclusion, most of the routes in MBTA are bus routes, and in general, the travel times for the ferry are much longer than other transportation services. For rapid transit, the red lines take longer time than other routes, and for buses, some stops(especially Legacy Place) usually come with a longer delay.
+
+## Discussion and Method
+In future, we may think about getting all data from API. All data in archive is about sheduled time, while the data in MBTA portal is not comprehensive, as the data in archive. As a result, in the early stage of the project, I spent a lot of time searching, cleaning, and storing data. Part of the reason for this is that I did not read the dictionary carefully in the early stage, nor did I conduct a comprehensive research on MBTA. In early stage, I was not familiar with the meaning of the fields, and did a lot of repetitive work.
+
+Since only the adjacent stops data is considered when calculating the travel time, the final shiny app can not realized the idea of obtaining the travel time of any two points. Although it is essential and fascinating, there is no time to combine weather data.
